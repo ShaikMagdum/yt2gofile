@@ -66,7 +66,7 @@ class YouTubeDownloader:
             'geo_bypass_country': 'IN',
             'extractor_args': {
                 'youtube': {
-                    'player_client': ['tv_samsung', 'android', 'web']
+                    'player_client': ['tv_samsung']
                 }
             },
             'http_headers': {
@@ -94,14 +94,14 @@ class YouTubeDownloader:
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=False)
-        except Exception as e:
-            # Fallback without cookiefile if cookiefile had session mismatch
+        except Exception:
+            # Fallback without cookiefile if cookiefile had session/IP mismatch
             if 'cookiefile' in ydl_opts:
                 del ydl_opts['cookiefile']
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl_retry:
                     info = ydl_retry.extract_info(url, download=False)
             else:
-                raise e
+                raise
 
         if not info:
             raise ValueError("Could not extract video information from the provided URL.")
