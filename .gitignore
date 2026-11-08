@@ -6,6 +6,7 @@ __pycache__/
 # Builds
 dist/
 build/
+.wrangler/
 
 # Temporary downloads
 backend/temp_downloads/
@@ -13,6 +14,7 @@ backend/temp_downloads/
 *.mp3
 *.webm
 *.m4a
+*.log
 
 # Environment
 .env

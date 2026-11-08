@@ -1,5 +1,5 @@
 @echo off
-title YT2GoFile - YouTube to GoFile Downloader
+title YT2GoFile - YouTube to GoFile Turbo
 echo ============================================================
 echo           YT2GoFile - High Speed YouTube to GoFile
 echo ============================================================
@@ -13,10 +13,15 @@ timeout /t 2 /nobreak >nul
 echo Starting React Vite Frontend on http://localhost:5173...
 start "YT2GoFile Frontend" cmd /k "cd /d %~dp0frontend && npm run dev"
 
+timeout /t 3 /nobreak >nul
+
+echo Launching YT2GoFile in your default browser...
+start http://localhost:5173
+
 echo.
 echo ============================================================
 echo   Services are running!
-echo   Frontend: http://localhost:5173
-echo   Backend:  http://localhost:8000 (API Docs: http://localhost:8000/docs)
+echo   Frontend UI: http://localhost:5173
+echo   Backend API: http://localhost:8000
 echo ============================================================
 echo.
