@@ -69,6 +69,17 @@ def debug_info():
         "ytdlp_version": yt_dlp.version.__version__
     }
 
+@app.get("/api/test-ytdlp")
+def test_ytdlp(url: str = "https://youtu.be/dQw4w9WgXcQ"):
+    import subprocess
+    cmd = ["yt-dlp", "-v", "--dump-json", "--simulate", url]
+    res = subprocess.run(cmd, capture_output=True, text=True)
+    return {
+        "returncode": res.returncode,
+        "stdout": res.stdout[:500],
+        "stderr": res.stderr
+    }
+
 @app.get("/api/gofile-servers")
 async def get_gofile_servers():
     """
