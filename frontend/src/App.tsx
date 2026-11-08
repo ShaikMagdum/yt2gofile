@@ -18,9 +18,14 @@ import {
   Server
 } from 'lucide-react';
 
-const API_BASE = 'http://localhost:8000';
+const isLocalHost = typeof window !== 'undefined' &&
+  (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+
+const DEFAULT_API_BASE = isLocalHost ? 'http://localhost:8000' : '';
 
 export function App() {
+  const [backendUrl, setBackendUrl] = useState(() => localStorage.getItem('yt2gofile_backend_url') || DEFAULT_API_BASE);
+  const API_BASE = backendUrl || '';
   const [url, setUrl] = useState('');
   const [isLoadingInfo, setIsLoadingInfo] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -196,17 +201,20 @@ export function App() {
     newToken: string,
     newFolderId: string,
     newServer: string,
-    newCustomServers: string[]
+    newCustomServers: string[],
+    newBackendUrl: string
   ) => {
     setGofileToken(newToken);
     setGofileFolderId(newFolderId);
     setSelectedServer(newServer);
     setCustomServers(newCustomServers);
+    setBackendUrl(newBackendUrl);
 
     localStorage.setItem('yt2gofile_token', newToken);
     localStorage.setItem('yt2gofile_folder_id', newFolderId);
     localStorage.setItem('yt2gofile_selected_server', newServer);
     localStorage.setItem('yt2gofile_custom_servers', JSON.stringify(newCustomServers));
+    localStorage.setItem('yt2gofile_backend_url', newBackendUrl);
   };
 
   const handleClearHistory = () => {
@@ -393,6 +401,7 @@ export function App() {
         selectedServer={selectedServer}
         availableServers={availableServers}
         customServers={customServers}
+        backendUrl={backendUrl}
         onSave={handleSaveSettings}
       />
 

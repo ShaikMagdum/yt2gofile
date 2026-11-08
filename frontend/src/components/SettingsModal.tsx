@@ -10,7 +10,8 @@ interface SettingsModalProps {
   selectedServer: string;
   availableServers: GoFileServerItem[];
   customServers: string[];
-  onSave: (token: string, folderId: string, server: string, customServers: string[]) => void;
+  backendUrl?: string;
+  onSave: (token: string, folderId: string, server: string, customServers: string[], backendUrl: string) => void;
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
@@ -21,11 +22,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   selectedServer,
   availableServers,
   customServers: initialCustomServers,
+  backendUrl: initialBackendUrl = '',
   onSave
 }) => {
   const [currentToken, setCurrentToken] = useState(token);
   const [currentFolderId, setCurrentFolderId] = useState(folderId);
   const [currentServer, setCurrentServer] = useState(selectedServer || 'auto');
+  const [currentBackendUrl, setCurrentBackendUrl] = useState(initialBackendUrl);
   const [customServers, setCustomServers] = useState<string[]>(initialCustomServers || []);
   const [newServerInput, setNewServerInput] = useState('');
   const [saved, setSaved] = useState(false);
@@ -66,7 +69,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
-    onSave(currentToken.trim(), currentFolderId.trim(), currentServer.trim(), customServers);
+    onSave(
+      currentToken.trim(),
+      currentFolderId.trim(),
+      currentServer.trim(),
+      customServers,
+      currentBackendUrl.trim()
+    );
     setSaved(true);
     setTimeout(() => {
       setSaved(false);
@@ -187,6 +196,24 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 </div>
               )}
             </div>
+          </div>
+
+          {/* Backend API URL Field */}
+          <div className="space-y-1.5">
+            <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+              <Server className="w-3.5 h-3.5 text-blue-400" />
+              <span>Backend API URL</span>
+            </label>
+            <input
+              type="text"
+              value={currentBackendUrl}
+              onChange={e => setCurrentBackendUrl(e.target.value)}
+              placeholder="e.g. https://yt2gofile-backend.onrender.com or empty for automatic"
+              className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-white placeholder-slate-600 focus:outline-none focus:border-blue-500 transition text-sm font-mono"
+            />
+            <p className="text-[11px] text-slate-400">
+              Leave blank to use automatic Cloudflare Pages Functions proxy or local server.
+            </p>
           </div>
 
           {/* Token Field */}
