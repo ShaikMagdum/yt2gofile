@@ -9,13 +9,7 @@ from typing import Dict, Any, List, Optional, Callable
 def _resolve_cookie_file() -> Optional[str]:
     """
     Resolves, extracts, or decodes a valid cookies.txt file for yt-dlp.
-    Supports:
-    1. YOUTUBE_COOKIES_B64 environment variable (for Render/Cloud hosting)
-    2. /etc/secrets/cookies.txt (Render secret file mount)
-    3. Local backend/cookies.txt or project root cookies.txt
-    4. Auto-extraction from local browser (Firefox)
     """
-    # 1. Environment variable base64 encoded
     b64_cookies = os.environ.get("YOUTUBE_COOKIES_B64")
     if b64_cookies and len(b64_cookies.strip()) > 50:
         try:
@@ -27,7 +21,6 @@ def _resolve_cookie_file() -> Optional[str]:
         except Exception:
             pass
 
-    # 2. Render secret file mount
     if os.path.exists("/etc/secrets/cookies.txt"):
         try:
             import shutil
@@ -38,7 +31,6 @@ def _resolve_cookie_file() -> Optional[str]:
         except Exception:
             pass
 
-    # 3. Local disk files
     backend_dir = os.path.dirname(os.path.abspath(__file__))
     candidates = [
         os.path.join(backend_dir, "cookies.txt"),
@@ -48,7 +40,6 @@ def _resolve_cookie_file() -> Optional[str]:
         if os.path.exists(c) and os.path.getsize(c) > 0:
             return os.path.abspath(c)
 
-    # 4. Auto-extract from Firefox on local machine
     try:
         from yt_dlp.cookies import extract_cookies_from_browser
         jar = extract_cookies_from_browser('firefox')
@@ -71,6 +62,13 @@ class YouTubeDownloader:
             'no_warnings': True,
             'nocheckcertificate': True,
             'source_address': '0.0.0.0',
+            'geo_bypass': True,
+            'geo_bypass_country': 'IN',
+            'extractor_args': {
+                'youtube': {
+                    'player_client': ['tv_samsung', 'android', 'web']
+                }
+            },
             'http_headers': {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
                 'Accept-Language': 'en-US,en;q=0.9',
@@ -78,12 +76,6 @@ class YouTubeDownloader:
         }
         if cookie_file:
             opts['cookiefile'] = cookie_file
-        else:
-            opts['extractor_args'] = {
-                'youtube': {
-                    'player_client': ['tv', 'android', 'web']
-                }
-            }
         return opts
 
     @staticmethod
@@ -103,10 +95,9 @@ class YouTubeDownloader:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=False)
         except Exception as e:
-            err_msg = str(e).lower()
-            if "not a bot" in err_msg or "sign in" in err_msg:
-                # Fallback to alternate player client
-                ydl_opts['extractor_args'] = {'youtube': {'player_client': ['tv', 'android', 'web']}}
+            # Fallback without cookiefile if cookiefile had session mismatch
+            if 'cookiefile' in ydl_opts:
+                del ydl_opts['cookiefile']
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl_retry:
                     info = ydl_retry.extract_info(url, download=False)
             else:
@@ -207,13 +198,13 @@ class YouTubeDownloader:
                         "eta": 0
                     })
 
-        # High-performance options (Multi-threaded fragment downloads for 10Mbps-100Mbps+ speeds)
+        # Base high-performance options (Multi-threaded fragment downloads for 10Mbps-100Mbps+ speeds)
         ydl_opts = YouTubeDownloader._get_base_opts()
         ydl_opts.update({
             'progress_hooks': [ydl_hook],
-            'concurrent_fragment_downloads': 16, # Multi-fragment parallel acceleration
-            'buffersize': 16 * 1024 * 1024,      # 16MB memory buffer
-            'http_chunk_size': 10485760,         # 10MB HTTP chunk size
+            'concurrent_fragment_downloads': 16,
+            'buffersize': 16 * 1024 * 1024,
+            'http_chunk_size': 10485760,
             'retries': 10,
             'fragment_retries': 10,
             'file_access_retries': 5,
@@ -241,28 +232,37 @@ class YouTubeDownloader:
                 'merge_output_format': 'mp4',
             })
 
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            filename = ydl.prepare_filename(info)
-
-            if quality == 'mp3':
-                base, _ = os.path.splitext(filename)
-                target_file = f"{base}.mp3"
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=True)
+                filename = ydl.prepare_filename(info)
+        except Exception:
+            if 'cookiefile' in ydl_opts:
+                del ydl_opts['cookiefile']
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl_retry:
+                    info = ydl_retry.extract_info(url, download=True)
+                    filename = ydl_retry.prepare_filename(info)
             else:
-                base, _ = os.path.splitext(filename)
-                target_file = f"{base}.mp4"
-                if not os.path.exists(target_file) and os.path.exists(filename):
-                    target_file = filename
+                raise
 
-            if not os.path.exists(target_file):
-                candidates = [
-                    os.path.join(output_dir, f)
-                    for f in os.listdir(output_dir)
-                    if task_id in f
-                ]
-                if candidates:
-                    target_file = candidates[0]
-                else:
-                    raise FileNotFoundError(f"Downloaded file not found for task {task_id}")
+        if quality == 'mp3':
+            base, _ = os.path.splitext(filename)
+            target_file = f"{base}.mp3"
+        else:
+            base, _ = os.path.splitext(filename)
+            target_file = f"{base}.mp4"
+            if not os.path.exists(target_file) and os.path.exists(filename):
+                target_file = filename
 
-            return target_file
+        if not os.path.exists(target_file):
+            candidates = [
+                os.path.join(output_dir, f)
+                for f in os.listdir(output_dir)
+                if task_id in f
+            ]
+            if candidates:
+                target_file = candidates[0]
+            else:
+                raise FileNotFoundError(f"Downloaded file not found for task {task_id}")
+
+        return target_file
