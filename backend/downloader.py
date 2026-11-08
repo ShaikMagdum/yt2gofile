@@ -8,7 +8,7 @@ from typing import Dict, Any, List, Optional, Callable
 
 def _resolve_cookie_file() -> Optional[str]:
     """
-    Resolves, extracts, or decodes a valid cookies.txt file for yt-dlp.
+    Resolves, extracts, or decodes an optional cookies.txt file if configured explicitly.
     """
     b64_cookies = os.environ.get("YOUTUBE_COOKIES_B64")
     if b64_cookies and len(b64_cookies.strip()) > 50:
@@ -31,32 +31,16 @@ def _resolve_cookie_file() -> Optional[str]:
         except Exception:
             pass
 
-    backend_dir = os.path.dirname(os.path.abspath(__file__))
-    candidates = [
-        os.path.join(backend_dir, "cookies.txt"),
-        os.path.join(backend_dir, "..", "cookies.txt"),
-    ]
-    for c in candidates:
-        if os.path.exists(c) and os.path.getsize(c) > 0:
-            return os.path.abspath(c)
-
-    try:
-        from yt_dlp.cookies import extract_cookies_from_browser
-        jar = extract_cookies_from_browser('firefox')
-        if jar and len(jar) > 0:
-            save_path = os.path.join(backend_dir, "cookies.txt")
-            jar.save(save_path, ignore_discard=True, ignore_expires=True)
-            return save_path
-    except Exception:
-        pass
-
     return None
 
 
 class YouTubeDownloader:
     @staticmethod
-    def _get_base_opts() -> Dict[str, Any]:
-        cookie_file = _resolve_cookie_file()
+    def _get_base_opts(use_cookies: bool = False) -> Dict[str, Any]:
+        """
+        Base yt-dlp options using tv_samsung player client with Indian geo-bypass.
+        Provides access to 4K UHD (2160p), 2K QHD (1440p), 1080p, 720p, etc. without bot challenges.
+        """
         opts: Dict[str, Any] = {
             'quiet': True,
             'no_warnings': True,
@@ -68,14 +52,12 @@ class YouTubeDownloader:
                 'youtube': {
                     'player_client': ['tv_samsung']
                 }
-            },
-            'http_headers': {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-                'Accept-Language': 'en-US,en;q=0.9',
             }
         }
-        if cookie_file:
-            opts['cookiefile'] = cookie_file
+        if use_cookies:
+            cookie_file = _resolve_cookie_file()
+            if cookie_file:
+                opts['cookiefile'] = cookie_file
         return opts
 
     @staticmethod
@@ -84,7 +66,7 @@ class YouTubeDownloader:
         Extracts metadata and format options from a YouTube URL without downloading.
         Accurately discovers all available qualities (4K UHD 2160p, 2K 1440p, 1080p, 720p, 480p, 360p, MP3).
         """
-        ydl_opts = YouTubeDownloader._get_base_opts()
+        ydl_opts = YouTubeDownloader._get_base_opts(use_cookies=False)
         ydl_opts.update({
             'skip_download': True,
             'extract_flat': False
@@ -95,13 +77,11 @@ class YouTubeDownloader:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=False)
         except Exception:
-            # Fallback without cookiefile if cookiefile had session/IP mismatch
-            if 'cookiefile' in ydl_opts:
-                del ydl_opts['cookiefile']
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl_retry:
-                    info = ydl_retry.extract_info(url, download=False)
-            else:
-                raise
+            # Fallback with cookies if available
+            retry_opts = YouTubeDownloader._get_base_opts(use_cookies=True)
+            retry_opts.update({'skip_download': True, 'extract_flat': False})
+            with yt_dlp.YoutubeDL(retry_opts) as ydl_retry:
+                info = ydl_retry.extract_info(url, download=False)
 
         if not info:
             raise ValueError("Could not extract video information from the provided URL.")
@@ -199,7 +179,7 @@ class YouTubeDownloader:
                     })
 
         # Base high-performance options (Multi-threaded fragment downloads for 10Mbps-100Mbps+ speeds)
-        ydl_opts = YouTubeDownloader._get_base_opts()
+        ydl_opts = YouTubeDownloader._get_base_opts(use_cookies=False)
         ydl_opts.update({
             'progress_hooks': [ydl_hook],
             'concurrent_fragment_downloads': 16,
@@ -237,13 +217,11 @@ class YouTubeDownloader:
                 info = ydl.extract_info(url, download=True)
                 filename = ydl.prepare_filename(info)
         except Exception:
-            if 'cookiefile' in ydl_opts:
-                del ydl_opts['cookiefile']
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl_retry:
-                    info = ydl_retry.extract_info(url, download=True)
-                    filename = ydl_retry.prepare_filename(info)
-            else:
-                raise
+            retry_opts = YouTubeDownloader._get_base_opts(use_cookies=True)
+            retry_opts.update(ydl_opts)
+            with yt_dlp.YoutubeDL(retry_opts) as ydl_retry:
+                info = ydl_retry.extract_info(url, download=True)
+                filename = ydl_retry.prepare_filename(info)
 
         if quality == 'mp3':
             base, _ = os.path.splitext(filename)

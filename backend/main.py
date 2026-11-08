@@ -2,6 +2,7 @@ import os
 import sys
 import uuid
 import asyncio
+import yt_dlp
 
 # Ensure backend directory is in python path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -51,6 +52,21 @@ def read_root():
         "service": "YouTube to GoFile Turbo API",
         "status": "online",
         "version": "2.0.0"
+    }
+
+@app.get("/api/debug")
+def debug_info():
+    import subprocess
+    import shutil
+    deno_path = shutil.which("deno")
+    node_path = shutil.which("node")
+    ffmpeg_path = shutil.which("ffmpeg")
+    return {
+        "deno": deno_path,
+        "node": node_path,
+        "ffmpeg": ffmpeg_path,
+        "path": os.environ.get("PATH"),
+        "ytdlp_version": yt_dlp.version.__version__
     }
 
 @app.get("/api/gofile-servers")
