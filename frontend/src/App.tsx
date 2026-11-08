@@ -6,7 +6,7 @@ import { TaskProgress } from './components/TaskProgress';
 import { ResultCard } from './components/ResultCard';
 import { HistoryList } from './components/HistoryList';
 import { YoutubeIcon } from './components/YoutubeIcon';
-import type { VideoInfo, TaskStatus, DownloadHistoryItem } from './types';
+import type { VideoInfo, TaskStatus, DownloadHistoryItem, GoFileServerItem } from './types';
 import {
   Search,
   Sparkles,
@@ -14,7 +14,8 @@ import {
   Clipboard,
   ShieldCheck,
   Zap,
-  HardDrive
+  HardDrive,
+  Server
 } from 'lucide-react';
 
 const API_BASE = 'http://localhost:8000';
@@ -28,11 +29,21 @@ export function App() {
   const [currentTask, setCurrentTask] = useState<TaskStatus | null>(null);
   const [taskId, setTaskId] = useState<string | null>(null);
 
-  // Settings
+  // Settings & Servers
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [gofileToken, setGofileToken] = useState(() => localStorage.getItem('yt2gofile_token') || '');
   const [gofileFolderId, setGofileFolderId] = useState(() => localStorage.getItem('yt2gofile_folder_id') || '');
-  const [bestServer, setBestServer] = useState('store3');
+  const [bestServer, setBestServer] = useState('store-eu-par-6');
+  const [availableServers, setAvailableServers] = useState<GoFileServerItem[]>([]);
+  const [selectedServer, setSelectedServer] = useState<string>(() => localStorage.getItem('yt2gofile_selected_server') || 'auto');
+  const [customServers, setCustomServers] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('yt2gofile_custom_servers');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
 
   // History
   const [history, setHistory] = useState<DownloadHistoryItem[]>(() => {
@@ -44,12 +55,15 @@ export function App() {
     }
   });
 
-  // Query best server on mount
+  // Query servers list on mount
   useEffect(() => {
     fetch(`${API_BASE}/api/gofile-servers`)
       .then(res => res.json())
       .then(data => {
         if (data.bestServer) setBestServer(data.bestServer);
+        if (data.servers && Array.isArray(data.servers)) {
+          setAvailableServers(data.servers);
+        }
       })
       .catch(() => {});
   }, []);
@@ -142,12 +156,15 @@ export function App() {
 
     setError(null);
     try {
+      const effectiveServer = selectedServer === 'auto' ? 'auto' : selectedServer;
+
       const res = await fetch(`${API_BASE}/api/download`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           url: url.trim(),
           quality,
+          gofileServer: effectiveServer,
           gofileToken: gofileToken || null,
           gofileFolderId: gofileFolderId || null
         })
@@ -163,6 +180,7 @@ export function App() {
         id: data.taskId,
         url: url.trim(),
         quality,
+        server: effectiveServer,
         status: 'processing',
         stage: 'downloading',
         percent: 0,
@@ -174,11 +192,21 @@ export function App() {
     }
   };
 
-  const handleSaveSettings = (newToken: string, newFolderId: string) => {
+  const handleSaveSettings = (
+    newToken: string,
+    newFolderId: string,
+    newServer: string,
+    newCustomServers: string[]
+  ) => {
     setGofileToken(newToken);
     setGofileFolderId(newFolderId);
+    setSelectedServer(newServer);
+    setCustomServers(newCustomServers);
+
     localStorage.setItem('yt2gofile_token', newToken);
     localStorage.setItem('yt2gofile_folder_id', newFolderId);
+    localStorage.setItem('yt2gofile_selected_server', newServer);
+    localStorage.setItem('yt2gofile_custom_servers', JSON.stringify(newCustomServers));
   };
 
   const handleClearHistory = () => {
@@ -194,11 +222,13 @@ export function App() {
     setError(null);
   };
 
+  const displayServerName = selectedServer === 'auto' ? `Auto (${bestServer})` : selectedServer;
+
   return (
     <div className="min-h-screen bg-[#0B0F19] text-slate-100 flex flex-col font-sans">
       {/* Header */}
       <Header
-        bestServer={bestServer}
+        bestServer={selectedServer === 'auto' ? bestServer : selectedServer}
         onOpenSettings={() => setIsSettingsOpen(true)}
         hasCustomToken={Boolean(gofileToken)}
       />
@@ -209,7 +239,7 @@ export function App() {
         <div className="text-center space-y-3">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-red-500/10 border border-red-500/20 text-red-400 text-xs font-semibold uppercase tracking-wider">
             <Sparkles className="w-3.5 h-3.5" />
-            <span>High-Speed yt-dlp + GoFile Cloud Engine</span>
+            <span>High-Speed yt-dlp 16x Threads + GoFile Cloud</span>
           </div>
 
           <h1 className="text-3xl sm:text-4xl md:text-5xl font-black text-white tracking-tight">
@@ -217,57 +247,82 @@ export function App() {
           </h1>
 
           <p className="text-slate-400 text-sm md:text-base max-w-xl mx-auto">
-            Extract YouTube videos in 4K, 1080p, 720p or 320kbps MP3 audio and automatically generate an instant, permanent GoFile download link.
+            Extract YouTube videos in 4K, 1080p, 720p or 320kbps MP3 audio with multi-threaded download acceleration, uploaded directly to your chosen GoFile server.
           </p>
         </div>
 
         {/* Search / Input Box */}
-        <form onSubmit={handleInspectUrl} className="relative group">
-          <div className="flex items-center bg-slate-900 border-2 border-slate-800 focus-within:border-emerald-500/80 rounded-2xl shadow-2xl overflow-hidden transition duration-200">
-            <div className="pl-4 text-slate-500">
-              <YoutubeIcon className="w-6 h-6 text-red-500" />
+        <div className="space-y-2">
+          <form onSubmit={handleInspectUrl} className="relative group">
+            <div className="flex items-center bg-slate-900 border-2 border-slate-800 focus-within:border-emerald-500/80 rounded-2xl shadow-2xl overflow-hidden transition duration-200">
+              <div className="pl-4 text-slate-500">
+                <YoutubeIcon className="w-6 h-6 text-red-500" />
+              </div>
+
+              <input
+                type="text"
+                value={url}
+                onChange={e => setUrl(e.target.value)}
+                placeholder="Paste YouTube video or Shorts link here..."
+                className="flex-1 px-4 py-4 bg-transparent text-white placeholder-slate-500 focus:outline-none text-sm md:text-base"
+              />
+
+              {/* Quick Paste Button */}
+              {!url && (
+                <button
+                  type="button"
+                  onClick={handlePasteClipboard}
+                  className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 mr-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-medium transition cursor-pointer"
+                >
+                  <Clipboard className="w-3.5 h-3.5" />
+                  <span>Paste</span>
+                </button>
+              )}
+
+              {/* Submit / Fetch Button */}
+              <button
+                type="submit"
+                disabled={isLoadingInfo || !url.trim()}
+                className="m-2 px-5 py-3 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-semibold transition text-sm flex items-center gap-2 shadow-lg shadow-emerald-600/20 disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0 cursor-pointer"
+              >
+                {isLoadingInfo ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    <span>Inspecting...</span>
+                  </>
+                ) : (
+                  <>
+                    <Search className="w-4 h-4" />
+                    <span>Fetch Info</span>
+                  </>
+                )}
+              </button>
             </div>
+          </form>
 
-            <input
-              type="text"
-              value={url}
-              onChange={e => setUrl(e.target.value)}
-              placeholder="Paste YouTube video or Shorts link here..."
-              className="flex-1 px-4 py-4 bg-transparent text-white placeholder-slate-500 focus:outline-none text-sm md:text-base"
-            />
-
-            {/* Quick Paste Button */}
-            {!url && (
+          {/* Server Badge & Speed Boost Status */}
+          <div className="flex flex-wrap items-center justify-between text-xs text-slate-400 px-2 gap-2">
+            <div className="flex items-center gap-2">
+              <span className="flex items-center gap-1 text-slate-400">
+                <Server className="w-3.5 h-3.5 text-emerald-400" />
+                Target GoFile Server:
+              </span>
               <button
                 type="button"
-                onClick={handlePasteClipboard}
-                className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 mr-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-medium transition"
+                onClick={() => setIsSettingsOpen(true)}
+                className="font-mono text-emerald-400 hover:text-emerald-300 font-medium bg-emerald-950/40 border border-emerald-800/60 px-2.5 py-0.5 rounded-md hover:border-emerald-600 transition inline-flex items-center gap-1 cursor-pointer"
               >
-                <Clipboard className="w-3.5 h-3.5" />
-                <span>Paste</span>
+                <span>{displayServerName}</span>
+                <span className="text-[10px] text-slate-400 underline decoration-slate-600 ml-0.5">change</span>
               </button>
-            )}
+            </div>
 
-            {/* Submit / Fetch Button */}
-            <button
-              type="submit"
-              disabled={isLoadingInfo || !url.trim()}
-              className="m-2 px-5 py-3 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-semibold transition text-sm flex items-center gap-2 shadow-lg shadow-emerald-600/20 disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0"
-            >
-              {isLoadingInfo ? (
-                <>
-                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                  <span>Inspecting...</span>
-                </>
-              ) : (
-                <>
-                  <Search className="w-4 h-4" />
-                  <span>Fetch Info</span>
-                </>
-              )}
-            </button>
+            <div className="flex items-center gap-1.5 text-slate-400">
+              <Zap className="w-3.5 h-3.5 text-amber-400" />
+              <span>Turbo 16x Fragment Speed Enabled</span>
+            </div>
           </div>
-        </form>
+        </div>
 
         {/* Error Alert */}
         {error && (
@@ -287,7 +342,7 @@ export function App() {
           <ResultCard task={currentTask} onReset={handleReset} />
         )}
 
-        {/* Video Preview & Quality Selection (shown when inspected and not downloading/completed) */}
+        {/* Video Preview & Quality Selection */}
         {videoInfo && (!currentTask || currentTask.status === 'failed') && (
           <VideoInfoCard
             info={videoInfo}
@@ -311,8 +366,8 @@ export function App() {
               <div className="w-8 h-8 rounded-lg bg-emerald-500/10 text-emerald-400 flex items-center justify-center font-bold">
                 <HardDrive className="w-4 h-4" />
               </div>
-              <h4 className="font-semibold text-white text-sm">Direct GoFile Link</h4>
-              <p className="text-xs text-slate-400">Streamed straight to GoFile servers for fast, uncapped download speeds.</p>
+              <h4 className="font-semibold text-white text-sm">Custom GoFile Server</h4>
+              <p className="text-xs text-slate-400">Streamed straight to your chosen GoFile server cluster for fast, uncapped speeds.</p>
             </div>
 
             <div className="p-4 rounded-2xl bg-slate-900/50 border border-slate-800/80 space-y-2">
@@ -335,6 +390,9 @@ export function App() {
         onClose={() => setIsSettingsOpen(false)}
         token={gofileToken}
         folderId={gofileFolderId}
+        selectedServer={selectedServer}
+        availableServers={availableServers}
+        customServers={customServers}
         onSave={handleSaveSettings}
       />
 

@@ -4,18 +4,44 @@ import uuid
 import yt_dlp
 from typing import Dict, Any, List, Optional, Callable
 
+# Check for cookies.txt in current directory or parent directory
+def _find_cookie_file() -> Optional[str]:
+    candidates = [
+        os.path.join(os.path.dirname(__file__), "cookies.txt"),
+        os.path.join(os.path.dirname(__file__), "..", "cookies.txt"),
+    ]
+    for c in candidates:
+        if os.path.exists(c) and os.path.getsize(c) > 0:
+            return os.path.abspath(c)
+    return None
+
 class YouTubeDownloader:
+    @staticmethod
+    def _get_base_opts() -> Dict[str, Any]:
+        opts: Dict[str, Any] = {
+            'quiet': True,
+            'no_warnings': True,
+            'extractor_args': {
+                'youtube': {
+                    'player_client': ['web', 'tv', 'android', 'ios']
+                }
+            }
+        }
+        cookie_file = _find_cookie_file()
+        if cookie_file:
+            opts['cookiefile'] = cookie_file
+        return opts
+
     @staticmethod
     def extract_info(url: str) -> Dict[str, Any]:
         """
         Extracts metadata and format options from a YouTube URL without downloading.
         """
-        ydl_opts = {
-            'quiet': True,
-            'no_warnings': True,
+        ydl_opts = YouTubeDownloader._get_base_opts()
+        ydl_opts.update({
             'skip_download': True,
             'extract_flat': False
-        }
+        })
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
@@ -76,7 +102,8 @@ class YouTubeDownloader:
         progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None
     ) -> str:
         """
-        Downloads the specified YouTube video/audio to disk and returns the local file path.
+        Downloads the specified YouTube video/audio to disk with multi-threaded fragment acceleration.
+        Returns the local file path.
         """
         os.makedirs(output_dir, exist_ok=True)
         task_id = str(uuid.uuid4())[:8]
@@ -106,40 +133,45 @@ class YouTubeDownloader:
                         "eta": 0
                     })
 
+        # Base high-performance options (Multi-threaded fragment downloads for 10Mbps-100Mbps+ speeds)
+        ydl_opts = YouTubeDownloader._get_base_opts()
+        ydl_opts.update({
+            'progress_hooks': [ydl_hook],
+            'concurrent_fragment_downloads': 16, # Multi-fragment parallel acceleration
+            'buffersize': 16 * 1024 * 1024,      # 16MB memory buffer
+            'http_chunk_size': 10485760,         # 10MB HTTP chunk size
+            'retries': 10,
+            'fragment_retries': 10,
+            'file_access_retries': 5,
+            'windowsfilenames': True,
+        })
+
+        out_template = os.path.join(output_dir, f"%(title).80s_{task_id}.%(ext)s")
+        ydl_opts['outtmpl'] = out_template
+
         if quality == 'mp3':
-            out_template = os.path.join(output_dir, f"%(title)s_{task_id}.%(ext)s")
-            ydl_opts = {
+            ydl_opts.update({
                 'format': 'bestaudio/best',
-                'outtmpl': out_template,
-                'progress_hooks': [ydl_hook],
                 'postprocessors': [{
                     'key': 'FFmpegExtractAudio',
                     'preferredcodec': 'mp3',
                     'preferredquality': '320',
                 }],
-                'quiet': True,
-                'no_warnings': True,
-            }
+            })
         else:
             # Video download with quality cap
             height_limit = quality if quality.isdigit() else '1080'
             format_str = f"bestvideo[height<={height_limit}]+bestaudio/best[height<={height_limit}]/best"
-            out_template = os.path.join(output_dir, f"%(title)s_{task_id}.%(ext)s")
-            ydl_opts = {
+            ydl_opts.update({
                 'format': format_str,
-                'outtmpl': out_template,
                 'merge_output_format': 'mp4',
-                'progress_hooks': [ydl_hook],
-                'quiet': True,
-                'no_warnings': True,
-            }
+            })
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
             filename = ydl.prepare_filename(info)
 
             if quality == 'mp3':
-                # Extension replaced by postprocessor
                 base, _ = os.path.splitext(filename)
                 target_file = f"{base}.mp3"
             else:
@@ -149,7 +181,7 @@ class YouTubeDownloader:
                     target_file = filename
 
             if not os.path.exists(target_file):
-                # Scan directory for matching prefix
+                # Search directory for task_id in filename
                 candidates = [
                     os.path.join(output_dir, f)
                     for f in os.listdir(output_dir)

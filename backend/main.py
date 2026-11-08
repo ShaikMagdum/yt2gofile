@@ -1,7 +1,11 @@
 import os
+import sys
 import uuid
 import asyncio
-import shutil
+
+# Ensure backend directory is in python path
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 from typing import Dict, Any, Optional
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
@@ -11,12 +15,12 @@ from downloader import YouTubeDownloader
 from gofile import GoFileUploader
 
 app = FastAPI(
-    title="YouTube to GoFile Downloader API",
-    description="High-Speed YouTube Video Downloader with Automated GoFile Uploads",
-    version="1.0.0"
+    title="YouTube to GoFile Turbo API",
+    description="High-Speed YouTube Video Downloader with Automated GoFile Uploads & Custom Server Selection",
+    version="2.0.0"
 )
 
-# Enable CORS for frontend Vite development & production
+# Enable CORS for frontend development & local network access
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -37,21 +41,24 @@ class InfoRequest(BaseModel):
 class DownloadRequest(BaseModel):
     url: str
     quality: str = "1080"
+    gofileServer: Optional[str] = "auto"
     gofileToken: Optional[str] = None
     gofileFolderId: Optional[str] = None
 
 @app.get("/")
 def read_root():
     return {
-        "service": "YouTube to GoFile Downloader",
+        "service": "YouTube to GoFile Turbo API",
         "status": "online",
-        "version": "1.0.0"
+        "version": "2.0.0"
     }
 
 @app.get("/api/gofile-servers")
 async def get_gofile_servers():
-    server = await GoFileUploader.get_best_server()
-    return {"status": "ok", "bestServer": server}
+    """
+    Returns list of live GoFile servers and current recommended server.
+    """
+    return await GoFileUploader.get_servers_data()
 
 @app.post("/api/info")
 async def get_video_info(req: InfoRequest):
@@ -64,7 +71,14 @@ async def get_video_info(req: InfoRequest):
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-def run_download_and_upload(task_id: str, url: str, quality: str, token: Optional[str], folder_id: Optional[str]):
+def run_download_and_upload(
+    task_id: str,
+    url: str,
+    quality: str,
+    server: Optional[str],
+    token: Optional[str],
+    folder_id: Optional[str]
+):
     local_file = None
     try:
         tasks[task_id]["status"] = "processing"
@@ -73,11 +87,13 @@ def run_download_and_upload(task_id: str, url: str, quality: str, token: Optiona
 
         def on_download_progress(p: Dict[str, Any]):
             tasks[task_id]["stage"] = p.get("stage", "downloading")
-            tasks[task_id]["percent"] = p.get("percent", 0.0)
+            dl_percent = p.get("percent", 0.0)
+            # Map download phase to 0% - 50%
+            tasks[task_id]["percent"] = round(dl_percent * 0.5, 1)
             tasks[task_id]["speed"] = p.get("speed", 0)
             tasks[task_id]["eta"] = p.get("eta", 0)
 
-        # Step 1: Download with yt-dlp
+        # Step 1: Accelerated Multi-threaded Download
         local_file = YouTubeDownloader.download(
             url=url,
             quality=quality,
@@ -89,21 +105,28 @@ def run_download_and_upload(task_id: str, url: str, quality: str, token: Optiona
         tasks[task_id]["percent"] = 50.0
         tasks[task_id]["localFile"] = os.path.basename(local_file)
 
-        # Step 2: Upload to GoFile
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        gofile_res = loop.run_until_complete(
-            GoFileUploader.upload_file(
-                file_path=local_file,
-                token=token,
-                folder_id=folder_id
-            )
+        def on_upload_progress(uploaded: int, total: int, speed: float, eta: float):
+            tasks[task_id]["stage"] = "uploading"
+            up_percent = (uploaded / total * 100) if total > 0 else 0
+            # Map upload phase to 50% - 99%
+            tasks[task_id]["percent"] = round(50.0 + (up_percent * 0.49), 1)
+            tasks[task_id]["speed"] = speed
+            tasks[task_id]["eta"] = eta
+
+        # Step 2: High-Speed Upload to Selected / Custom GoFile Server
+        gofile_res = GoFileUploader.upload_file_sync(
+            file_path=local_file,
+            server=server,
+            token=token,
+            folder_id=folder_id,
+            progress_callback=on_upload_progress
         )
-        loop.close()
 
         tasks[task_id]["status"] = "completed"
         tasks[task_id]["stage"] = "finished"
         tasks[task_id]["percent"] = 100.0
+        tasks[task_id]["speed"] = 0
+        tasks[task_id]["eta"] = 0
         tasks[task_id]["result"] = gofile_res
 
     except Exception as e:
@@ -127,6 +150,7 @@ async def start_download_task(req: DownloadRequest, background_tasks: Background
         "id": task_id,
         "url": req.url.strip(),
         "quality": req.quality,
+        "server": req.gofileServer or "auto",
         "status": "queued",
         "stage": "starting",
         "percent": 0.0,
@@ -141,6 +165,7 @@ async def start_download_task(req: DownloadRequest, background_tasks: Background
         task_id=task_id,
         url=req.url.strip(),
         quality=req.quality,
+        server=req.gofileServer,
         token=req.gofileToken,
         folder_id=req.gofileFolderId
     )

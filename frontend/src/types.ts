@@ -17,10 +17,16 @@ export interface VideoInfo {
   qualities: VideoQuality[];
 }
 
+export interface GoFileServerItem {
+  name: string;
+  zone: string;
+}
+
 export interface TaskStatus {
   id: string;
   url: string;
   quality: string;
+  server?: string;
   status: 'queued' | 'processing' | 'completed' | 'failed';
   stage: 'starting' | 'downloading' | 'processing' | 'uploading' | 'finished';
   percent: number;
